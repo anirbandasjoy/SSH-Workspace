@@ -1,45 +1,57 @@
-# SSH Workspace
+<p align="center">
+  <img src="apps/desktop/app-icon/logo.svg" width="96" height="96" alt="Vexo logo">
+</p>
 
-A Tauri 2 desktop application for managing SSH keys, GitHub profiles, Git authors, and folder-based account rules. The interface uses React, TypeScript, GitHub Primer, and Octicons. The Rust backend works with your installed Git and OpenSSH.
+<h1 align="center">Vexo</h1>
 
-## Run on Linux
+<p align="center">Every GitHub account. The right key. Every time.</p>
 
-Launch the compiled executable from the project directory.
+Vexo is a desktop app that manages SSH keys, GitHub accounts, commit authors and folder rules, so every repository pushes with the right identity. It previews every configuration change as a diff and can undo the last one.
 
-```sh
-./src-tauri/target/release/ssh-workspace
-```
+![Vexo repository inspector](apps/web/public/screenshots/repositories.png)
 
-The Debian installer is under `src-tauri/target/release/bundle/deb/`. Install it to launch SSH Workspace from the applications menu.
+## Repository layout
 
-## Personal and work setup
+This is a [Turborepo](https://turborepo.dev) monorepo managed with pnpm.
 
-1. Open **Profiles → New profile**. Set a label, GitHub username, commit name and email, and a unique SSH alias. Select an existing key or generate an Ed25519 key, with or without a passphrase. Optionally choose a project folder to assign to this profile.
-2. Copy the public key and open GitHub's SSH key settings from the app. Register it as an authentication key while signed in to the intended account. Use a separate key for each account.
-3. Review the configuration changes and apply them. In **SSH keys**, load the key into the SSH agent your desktop session uses.
-4. Choose **Test connection** on the profile to see the account GitHub authenticates. On a first connection to github.com, **Preferences → Trust GitHub host key** previews the published Ed25519 key. Verify the fingerprint before applying it. [GitHub's SSH key fingerprints](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/githubs-ssh-key-fingerprints)
-5. Set up the second profile. Add additional paths in **Folder rules**. In **Repositories**, open a local project, find projects in a folder, or clone from GitHub. Cloning selects the destination folder’s profile by default. The inspector shows the effective commit author and the account used by the selected remote. Use **Preview fix** to review an incorrect remote alias.
-6. **Undo last change** restores the last applied configuration transaction and checks for intervening edits. Removing a repository from the workspace list only changes the app’s bookmarks.
+| Path | What it is |
+|---|---|
+| `apps/desktop` | The Vexo desktop app (Tauri 2, React, Rust). See its [README](apps/desktop/README.md). |
+| `apps/web` | The marketing and download website (Next.js, GitHub Primer tokens). |
+| `packages/typescript-config` | Shared TypeScript settings. |
+| `packages/eslint-config` | Shared ESLint settings. |
 
-## Delete a local SSH key
+## Getting started
 
-In **SSH keys**, select a key and choose **Delete key**. Review the file list before confirming permanent deletion. The app unloads the key from the SSH agent if it is loaded. If a managed profile or host uses the key, reassign it first. Remove the public key from GitHub or your server to revoke access there.
-
-## Development
-
-Install Node.js 22.12+ or a current LTS, pnpm 10, Rust, Git, OpenSSH, and the native packages for Tauri 2. The packaged build here targets Ubuntu/Debian x86-64 with GTK 3 and WebKitGTK 4.1. [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/)
+Install Node.js 22.12+, pnpm 10, Rust, Git, OpenSSH, and the [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/).
 
 ```sh
-pnpm install --frozen-lockfile
-pnpm desktop
+pnpm install
+pnpm desktop        # run the desktop app
+pnpm dev:web        # run the website on http://localhost:3000
 ```
+
+## Common tasks
 
 ```sh
-pnpm build
-cargo test --locked --manifest-path src-tauri/Cargo.toml
-pnpm tauri build --bundles deb
+pnpm build                          # build every app
+pnpm turbo run check-types lint test
+pnpm desktop:bundle                 # build apps/desktop/src-tauri/target/release/bundle/deb/Vexo_<version>_amd64.deb
 ```
 
-## Local configuration
+## Publishing a release
 
-The app stores its profile metadata, repository list, and single-step undo history in `$XDG_CONFIG_HOME/ssh-workspace` (default `~/.config/ssh-workspace`). It previews edits to the SSH configuration and Git conditional includes, and edits a repository’s chosen remote on request. Keys stay in the OpenSSH directory. Passphrases are used transiently for generation or agent loading. A custom SSH command, a repository-local author override, or a separate push URL can affect the identity in use. Open the repository inspector to see those settings and their sources.
+The website's download buttons point to the latest GitHub release asset named `Vexo_<version>_amd64.deb`, using the version in `apps/desktop/src-tauri/tauri.conf.json`.
+
+```sh
+pnpm desktop:bundle
+gh release create v0.1.1 "apps/desktop/src-tauri/target/release/bundle/deb/Vexo_0.1.1_amd64.deb" --title "Vexo 0.1.1"
+```
+
+Set these when deploying the website if they differ from the defaults:
+
+| Variable | Purpose |
+|---|---|
+| `NEXT_PUBLIC_SITE_URL` | Public URL of the website, used for social previews |
+| `NEXT_PUBLIC_REPO_URL` | GitHub repository URL |
+| `NEXT_PUBLIC_DOWNLOAD_URL` | Override the .deb download link |
