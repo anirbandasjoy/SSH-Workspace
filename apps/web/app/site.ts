@@ -13,7 +13,7 @@ function desktopVersion() {
 
 const repo =
   process.env.NEXT_PUBLIC_REPO_URL ??
-  "https://github.com/anirbandasjoy/SSH-Workspace";
+  "https://github.com/anirbandasjoy/vexo";
 const version = process.env.NEXT_PUBLIC_APP_VERSION ?? desktopVersion();
 const debFile = `Vexo_${version}_amd64.deb`;
 
