@@ -2,6 +2,7 @@ import { createRoot } from "react-dom/client";
 import { ThemeProvider, BaseStyles } from "@primer/react";
 import "@primer/primitives/dist/css/functional/themes/light.css";
 import "@primer/primitives/dist/css/functional/themes/dark.css";
+import "@primer/primitives/dist/css/functional/typography/typography.css";
 import { useEffect, useState } from "react";
 import App from "./App";
 import "./style.css";

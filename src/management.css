@@ -1,12 +1,6 @@
 .mw-page,
 .mw-dialog {
   color: var(--text);
-  font-family:
-    Inter,
-    -apple-system,
-    BlinkMacSystemFont,
-    "Segoe UI",
-    sans-serif;
 }
 .mw-page {
   padding: clamp(18px, 2.6vw, 36px);
@@ -38,8 +32,7 @@
 .mw-page-head h1 {
   font-size: clamp(24px, 2.3vw, 30px);
   line-height: 1.22;
-  font-weight: 650;
-  letter-spacing: -0.04em;
+  font-weight: 600;
 }
 .mw-page button,
 .mw-dialog button {
@@ -49,7 +42,7 @@
 .mw-link,
 .mw-icon-button {
   color: var(--text);
-  font-weight: 550;
+  font-weight: 600;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -141,8 +134,7 @@
 .mw-empty h2,
 .mw-detail-title h2 {
   font-size: 19px;
-  letter-spacing: -0.03em;
-  font-weight: 620;
+  font-weight: 600;
   line-height: 1.35;
   overflow-wrap: anywhere;
 }
@@ -247,7 +239,7 @@
 }
 .mw-facts dt {
   color: var(--muted);
-  font-weight: 450;
+  font-weight: 400;
 }
 .mw-facts dd {
   margin: 0;
@@ -256,8 +248,7 @@
 .mw-page code,
 .mw-dialog code,
 .mw-mono {
-  font-family:
-    "IBM Plex Mono", ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-family: var(--fontStack-monospace);
   font-size: 12px;
   line-height: 1.5;
 }
@@ -347,8 +338,7 @@
 }
 .mw-dialog-head h2 {
   font-size: 18px;
-  letter-spacing: -0.025em;
-  font-weight: 625;
+  font-weight: 600;
 }
 .mw-dialog-body {
   padding: 20px;
@@ -371,7 +361,7 @@
   gap: 5px;
   color: var(--text);
   font-size: 13px;
-  font-weight: 580;
+  font-weight: 600;
 }
 .mw-field small {
   color: var(--muted);
@@ -394,7 +384,7 @@
   max-width: 100%;
 }
 .mw-field input.mw-mono {
-  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-family: var(--fontStack-monospace);
   font-size: 13px;
 }
 .mw-field input[readonly] {
