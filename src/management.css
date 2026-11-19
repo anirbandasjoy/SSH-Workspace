@@ -470,3 +470,11 @@
     justify-self: start;
   }
 }
+.mw-missing {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--warn);
+}

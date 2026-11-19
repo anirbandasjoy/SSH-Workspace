@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { XIcon } from "@primer/octicons-react";
 import "./management.css";
 
@@ -17,12 +17,22 @@ export default function Modal({
 }: ModalProps) {
   const ref = useRef<HTMLDialogElement>(null);
   const heading = useId();
+  // Capture the opener during the first render, before React applies autoFocus
+  // to a field inside the dialog.
+  const [opener] = useState(() => document.activeElement);
 
   useEffect(() => {
     const dialog = ref.current;
     if (!dialog) return;
-    const opener = document.activeElement;
     dialog.showModal();
+    // Fields inside a closed dialog cannot take focus, so React's autoFocus
+    // has no effect and showModal() focuses the close button. Move focus to
+    // the first editable field so typing and Enter work immediately.
+    dialog
+      .querySelector<HTMLElement>(
+        ".mw-dialog-body :is(input, select, textarea):not([readonly]):not([disabled])",
+      )
+      ?.focus();
     return () => {
       dialog.close();
       if (

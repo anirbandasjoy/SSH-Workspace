@@ -575,6 +575,46 @@ fn ssh_alias_conflict(paths: &Paths, old: &Settings, new: &Settings) -> AppResul
     }
     Ok(())
 }
+const HOSTS_HOOK: &str =
+    "# SSH Workspace hosts\nInclude ~/.ssh/ssh-workspace-hosts.conf\nHost *\n";
+
+// Delete a host the user wrote by hand. Managed hosts and profile aliases are
+// removed through their own settings so the generated file stays consistent.
+fn config_host_plan(paths: &Paths, input: &Value) -> AppResult<Plan> {
+    let alias = text(input, "alias")?;
+    token(&alias, "host alias")?;
+    let settings: Settings = stored(&paths.settings())?;
+    if let Some(p) = settings
+        .profiles
+        .iter()
+        .find(|p| p.alias.eq_ignore_ascii_case(&alias))
+    {
+        return Err(format!(
+            "{alias} belongs to the {} profile. Remove that profile instead.",
+            p.name
+        ));
+    }
+    if settings
+        .hosts
+        .iter()
+        .any(|h| h.alias.eq_ignore_ascii_case(&alias))
+    {
+        return Err(format!("{alias} is a managed host. Remove it as a managed host instead."));
+    }
+    let (path, before, after) =
+        crate::native::remove_host_block(&paths.home.join(".ssh"), &alias, &paths.hosts())?;
+    if before.contains(HOSTS_HOOK) && !after.contains(HOSTS_HOOK) {
+        return Err("Deleting this host would change the SSH Workspace include. Edit the file manually.".into());
+    }
+    if read(&path)?.as_deref() != Some(before.as_str()) {
+        return Err(format!("{} changed while it was read. Try again.", path.display()));
+    }
+    let mut plan = Plan::new();
+    let display = changed_lines(&before, &after);
+    plan.change(path, Some(before), Some(after), Some(display));
+    Ok(plan)
+}
+
 fn settings_plan(paths: &Paths, input: &Value) -> AppResult<Plan> {
     let before = read(&paths.settings())?;
     let old: Settings = before
@@ -595,9 +635,7 @@ fn settings_plan(paths: &Paths, input: &Value) -> AppResult<Plan> {
     let was = old_ssh.is_some();
     let now = new_ssh.is_some();
     plan.managed(paths.hosts(), old_ssh, new_ssh)?;
-    let hook =
-        "# SSH Workspace hosts\nInclude ~/.ssh/ssh-workspace-hosts.conf\nHost *\n".to_owned();
-    plan.hook(paths.ssh(), hook, was, now, true)?;
+    plan.hook(paths.ssh(), HOSTS_HOOK.to_owned(), was, now, true)?;
     let previous = old.git_files(paths)?;
     let next = new.git_files(paths)?;
     let mut keys: Vec<_> = previous.keys().chain(next.keys()).cloned().collect();
@@ -940,8 +978,15 @@ fn snapshot(paths: &Paths) -> AppResult<Value> {
     recover(paths)?;
     let settings: Settings = stored(&paths.settings())?;
     let repos: Vec<String> = stored(&paths.repos())?;
+    let missing_keys: Vec<&str> = settings
+        .profiles
+        .iter()
+        .map(|p| p.key_path.as_str())
+        .chain(settings.hosts.iter().map(|h| h.key_path.as_str()))
+        .filter(|k| !Path::new(k).is_file())
+        .collect();
     Ok(
-        json!({"profiles":settings.profiles,"hosts":settings.hosts,"rules":settings.rules,"repositories":repos,"canUndo":paths.history().is_file()}),
+        json!({"profiles":settings.profiles,"hosts":settings.hosts,"rules":settings.rules,"repositories":repos,"canUndo":paths.history().is_file(),"missingKeys":missing_keys}),
     )
 }
 fn active() -> &'static Mutex<Option<Transaction>> {
@@ -957,6 +1002,7 @@ pub fn preview(payload: Value) -> AppResult<Value> {
     let plan = match text(&payload, "kind")?.as_str() {
         "remote" => remote_plan(&paths, &payload)?,
         "trustGithub" => trust_github(&paths)?,
+        "removeConfigHost" => config_host_plan(&paths, &payload)?,
         _ => settings_plan(&paths, &payload)?,
     };
     let response = json!({"token":plan.transaction.id,"files":plan.diff});
@@ -1188,6 +1234,47 @@ mod tests {
         commit(&paths, &t, true).unwrap();
         assert_eq!(read(&f.path).unwrap().unwrap(), original);
         assert!(!paths.history().exists());
+    }
+    #[test]
+    fn deletes_hand_written_hosts_with_review_and_undo() {
+        let (_temp, paths, profile) = fixture();
+        let mine = "\
+# Personal GitHub Account\nHost github.com\n  HostName github.com\n  User git\n  IdentityFile ~/.ssh/id_ed25519\n\n\
+# Work GitHub Account\nHost github.com-sagar\n  HostName github.com\n  User git\n  IdentityFile ~/.ssh/codeftshaunak\n\n\
+# Teach Github Account\nHost github.com-teach\n  HostName github.com\n  User git\n  IdentityFile ~/.ssh/id_ed25519_teach\n\n\n";
+        fs::write(paths.ssh(), mine).unwrap();
+        run(&paths, &profile);
+        let original = format!("{HOSTS_HOOK}{mine}");
+        assert_eq!(fs::read_to_string(paths.ssh()).unwrap(), original);
+        let remove = |alias: &str| {
+            let p = config_host_plan(&paths, &json!({"alias": alias}))?;
+            commit(&paths, &p.transaction, false)?;
+            Ok::<_, String>(fs::read_to_string(paths.ssh()).unwrap())
+        };
+        // Middle block: its comment goes, neighbours and spacing stay.
+        let after = remove("github.com-sagar").unwrap();
+        assert_eq!(after, original.replace("# Work GitHub Account\nHost github.com-sagar\n  HostName github.com\n  User git\n  IdentityFile ~/.ssh/codeftshaunak\n\n", ""));
+        // Undo restores the exact file.
+        let mut t: Transaction =
+            serde_json::from_str(&read(&paths.history()).unwrap().unwrap()).unwrap();
+        for c in &mut t.files {
+            std::mem::swap(&mut c.before, &mut c.after);
+        }
+        t.files.reverse();
+        commit(&paths, &t, true).unwrap();
+        assert_eq!(fs::read_to_string(paths.ssh()).unwrap(), original);
+        // First block after the managed include keeps the include intact.
+        let after = remove("github.com").unwrap();
+        assert!(after.starts_with("# SSH Workspace hosts\nInclude ~/.ssh/ssh-workspace-hosts.conf\nHost *\n# Work GitHub Account\nHost github.com-sagar\n"));
+        // Last block: trailing blank lines are trimmed.
+        let after = remove("github.com-teach").unwrap();
+        assert!(after.ends_with("IdentityFile ~/.ssh/codeftshaunak\n"), "{after:?}");
+        assert!(remove("github.com-teach").unwrap_err().contains("not found"));
+        // Profile aliases and the managed file are never edited here.
+        assert!(remove("github-work").unwrap_err().contains("profile"));
+        // Shared Host lines keep their other patterns.
+        fs::write(paths.ssh(), "Host one two\n  User git\n").unwrap();
+        assert_eq!(remove("one").unwrap(), "Host two\n  User git\n");
     }
     #[test]
     fn protects_external_config_and_recovers_interrupted_write() {

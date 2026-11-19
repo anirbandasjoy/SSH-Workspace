@@ -14,7 +14,7 @@ The Debian installer is under `src-tauri/target/release/bundle/deb/`. Install it
 
 ## Personal and work setup
 
-1. Open **Profiles → New profile**. Set a label, GitHub username, commit name and email, and a unique SSH alias. Select an existing key or generate an encrypted Ed25519 key. Optionally choose a project folder to assign to this profile.
+1. Open **Profiles → New profile**. Set a label, GitHub username, commit name and email, and a unique SSH alias. Select an existing key or generate an Ed25519 key, with or without a passphrase. Optionally choose a project folder to assign to this profile.
 2. Copy the public key and open GitHub's SSH key settings from the app. Register it as an authentication key while signed in to the intended account. Use a separate key for each account.
 3. Review the configuration changes and apply them. In **SSH keys**, load the key into the SSH agent your desktop session uses.
 4. Choose **Test connection** on the profile to see the account GitHub authenticates. On a first connection to github.com, **Preferences → Trust GitHub host key** previews the published Ed25519 key. Verify the fingerprint before applying it. [GitHub's SSH key fingerprints](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/githubs-ssh-key-fingerprints)

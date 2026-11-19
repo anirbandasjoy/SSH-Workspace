@@ -27,6 +27,7 @@ export interface WorkspaceState {
   rules: Rule[];
   repositories: string[];
   canUndo: boolean;
+  missingKeys?: string[];
 }
 export interface KeyInfo {
   path: string;
@@ -36,6 +37,7 @@ export interface KeyInfo {
   type: string;
   loaded: boolean;
   hasPrivate: boolean;
+  usedBy?: string[];
 }
 export interface Remote {
   name: string;

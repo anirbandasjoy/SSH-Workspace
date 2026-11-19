@@ -43,6 +43,14 @@ struct Output {
 fn message(err: impl std::fmt::Display) -> String {
     err.to_string()
 }
+// Name the missing file instead of surfacing a bare OS error.
+fn missing(path: &Path, err: std::io::Error) -> String {
+    if err.kind() == std::io::ErrorKind::NotFound {
+        format!("{} was not found.", path.display())
+    } else {
+        format!("{}: {err}", path.display())
+    }
+}
 
 // Disk-backed output avoids a full pipe when native clients produce diagnostics.
 // Sessions also isolate passphrase prompts from a terminal that launched the app.
@@ -263,7 +271,14 @@ fn author_setting(path: &Path, attribute: &str, env_key: &str) -> Result<(String
 
 pub fn inspect(payload: Value) -> Result<Value> {
     let selected = expand(field(&payload, "path")?)?;
-    let path = PathBuf::from(git_value(&selected, &["rev-parse", "--show-toplevel"])?);
+    if !selected.is_dir() {
+        return Err(format!("{} was not found.", selected.display()));
+    }
+    let top = git(&selected, &["rev-parse", "--show-toplevel"])?;
+    if !top.status.success() {
+        return Err(format!("{} is not inside a Git repository.", selected.display()));
+    }
+    let path = PathBuf::from(top.stdout);
     let (mut git_name, mut name_source) = author_setting(&path, "name", "GIT_AUTHOR_NAME")?;
     let (mut email, mut email_source) = author_setting(&path, "email", "GIT_AUTHOR_EMAIL")?;
     let identity = git(&path, &["var", "GIT_AUTHOR_IDENT"])?;
@@ -355,7 +370,7 @@ fn validated_pub(path: &Path) -> Result<(String, String, String)> {
     if path.extension().and_then(|s| s.to_str()) != Some("pub") {
         return Err("Choose an OpenSSH .pub file.".into());
     }
-    let meta = fs::metadata(path).map_err(message)?;
+    let meta = fs::metadata(path).map_err(|e| missing(path, e))?;
     if !meta.is_file() || meta.len() > 65536 {
         return Err("Invalid public key file.".into());
     }
@@ -415,14 +430,25 @@ pub fn keys() -> Result<Value> {
                 .collect()
         })
         .unwrap_or_default();
-    let paths: BTreeSet<_> = fs::read_dir(dir)
+    let paths: BTreeSet<_> = fs::read_dir(&dir)
         .map_err(message)?
         .filter_map(|item| item.ok().map(|e| e.path()))
         .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("pub"))
         .collect();
+    let references = identity_references(&dir);
     let entries: Vec<_> = paths
         .iter()
-        .filter_map(|p| describe_key(p, &loaded).ok())
+        .filter_map(|p| {
+            let mut entry = describe_key(p, &loaded).ok()?;
+            let private = p.with_extension("");
+            let used: BTreeSet<&str> = references
+                .iter()
+                .filter(|(_, path)| same_file(path, &private) || same_file(path, p))
+                .map(|(context, _)| context.as_str())
+                .collect();
+            entry["usedBy"] = json!(used);
+            Some(entry)
+        })
         .collect();
     Ok(Value::Array(entries))
 }
@@ -442,8 +468,13 @@ pub fn generate_key(payload: Value) -> Result<Value> {
             "Use a key filename containing letters, numbers, dots, hyphens or underscores.".into(),
         );
     }
-    let phrase = field(&payload, "passphrase")?;
-    if phrase.len() > 512 || phrase.contains(['\r', '\n']) {
+    // An empty passphrase creates an unencrypted key, like pressing Enter at
+    // the ssh-keygen prompts in a terminal.
+    let phrase = payload
+        .get("passphrase")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    if phrase.len() > 512 || phrase.contains(['\0', '\r', '\n']) {
         return Err("Use a passphrase on one line, up to 512 bytes.".into());
     }
     let dir = home()?.join(".ssh");
@@ -465,9 +496,16 @@ pub fn generate_key(payload: Value) -> Result<Value> {
     let generated = tmp.path().join("key");
     let mut cmd = command("ssh-keygen", &["-q", "-t", "ed25519", "-C", name, "-f"]);
     cmd.arg(&generated);
-    let mut input = format!("{phrase}\n{phrase}\n").into_bytes();
-    let result = run(cmd, 30, Some(&input));
-    input.fill(0);
+    let result = if phrase.is_empty() {
+        cmd.args(["-N", ""]);
+        run(cmd, 30, None)
+    } else {
+        // Supply a real passphrase on stdin so it never appears in process arguments.
+        let mut input = format!("{phrase}\n{phrase}\n").into_bytes();
+        let result = run(cmd, 30, Some(&input));
+        input.fill(0);
+        result
+    };
     if !result?.status.success() {
         return Err(
             "OpenSSH could not generate this key. Check the filename and passphrase.".into(),
@@ -528,13 +566,17 @@ pub fn agent_key(payload: Value) -> Result<Value> {
 pub fn delete_key(payload: Value) -> Result<Value> {
     let dir = home()?.join(".ssh");
     let agent_socket = std::env::var_os("SSH_AUTH_SOCK");
-    remove_key_files(
-        &dir,
-        &payload,
-        &crate::config::state()?,
-        agent_socket.as_deref(),
-    )?;
+    let state = with_config_hosts(&dir, crate::config::state()?);
+    remove_key_files(&dir, &payload, &state, agent_socket.as_deref())?;
     Ok(json!(true))
+}
+// Hosts written by hand in ~/.ssh/config protect their keys too.
+fn with_config_hosts(dir: &Path, mut state: Value) -> Value {
+    state["configHosts"] = identity_references(dir)
+        .into_iter()
+        .map(|(context, path)| json!({"label": format!("{context} in your SSH config"), "keyPath": path}))
+        .collect();
+    state
 }
 
 fn unload_deleted_key(
@@ -611,7 +653,7 @@ fn remove_key_files(
     }
     let selected_path = private.canonicalize().ok();
     let public_path = public.canonicalize().map_err(message)?;
-    for reference in ["profiles", "hosts"]
+    for reference in ["profiles", "hosts", "configHosts"]
         .into_iter()
         .flat_map(|kind| state[kind].as_array().into_iter().flatten())
     {
@@ -624,6 +666,11 @@ fn remove_key_files(
             || resolved.as_ref() == Some(&public_path)
             || (selected_path.is_some() && resolved == selected_path)
         {
+            if let Some(label) = reference["label"].as_str() {
+                return Err(format!(
+                    "{label} uses this key. Change that entry before deleting it."
+                ));
+            }
             let name = reference["name"]
                 .as_str()
                 .or_else(|| reference["alias"].as_str())
@@ -753,6 +800,7 @@ struct SshConfig {
     lines: Vec<Vec<String>>,
     aliases: BTreeSet<String>,
     file_count: usize,
+    files: Vec<PathBuf>,
 }
 
 fn read_config(path: &Path, base: &Path, depth: usize, parsed: &mut SshConfig) {
@@ -767,6 +815,7 @@ fn read_config(path: &Path, base: &Path, depth: usize, parsed: &mut SshConfig) {
         return;
     };
     parsed.file_count += 1;
+    parsed.files.push(path.to_path_buf());
     for line in contents.lines() {
         if parsed.lines.len() >= 40_000 {
             break;
@@ -824,6 +873,135 @@ pub(crate) fn declared_aliases(base: &Path) -> BTreeSet<String> {
     let mut parsed = SshConfig::default();
     read_config(&base.join("config"), base, 0, &mut parsed);
     parsed.aliases
+}
+// Every IdentityFile in the user's SSH configuration (including Include files),
+// labelled with the Host or Match block that declares it.
+fn identity_references(base: &Path) -> Vec<(String, PathBuf)> {
+    let mut parsed = SshConfig::default();
+    read_config(&base.join("config"), base, 0, &mut parsed);
+    let home = base.parent().map(Path::to_path_buf);
+    let mut context = "Host *".to_string();
+    let mut found = Vec::new();
+    for words in &parsed.lines {
+        match words[0].as_str() {
+            "host" => context = format!("Host {}", words[1..].join(" ")),
+            "match" => context = format!("Match {}", words[1..].join(" ")),
+            "identityfile" => {
+                let raw = words[1].as_str();
+                let path = match (raw.strip_prefix("~/"), &home) {
+                    (Some(rest), Some(h)) => h.join(rest),
+                    _ => match (raw.strip_prefix("%d/"), &home) {
+                        (Some(rest), Some(h)) => h.join(rest),
+                        _ => PathBuf::from(raw),
+                    },
+                };
+                if path.is_absolute() {
+                    found.push((context.clone(), path));
+                }
+            }
+            _ => {}
+        }
+    }
+    found
+}
+// Remove a hand-written `Host <alias>` entry from the SSH configuration or one
+// of its included files. Returns the file with its contents before and after.
+// A block whose Host line lists only this alias is removed with the comment
+// lines directly above it; otherwise only the alias is dropped from the line.
+pub(crate) fn remove_host_block(
+    base: &Path,
+    alias: &str,
+    managed: &Path,
+) -> Result<(PathBuf, String, String)> {
+    let mut parsed = SshConfig::default();
+    read_config(&base.join("config"), base, 0, &mut parsed);
+    let mut seen = HashSet::new();
+    let mut found = Vec::new();
+    for file in &parsed.files {
+        let real = file.canonicalize().unwrap_or_else(|_| file.clone());
+        if !seen.insert(real.clone()) || same_file(&real, managed) {
+            continue;
+        }
+        let Ok(text) = fs::read_to_string(&real) else {
+            continue;
+        };
+        let lines: Vec<&str> = text.split_inclusive('\n').collect();
+        for (index, line) in lines.iter().enumerate() {
+            let words = tokens(line);
+            if words.len() >= 2
+                && words[0].eq_ignore_ascii_case("host")
+                && words[1..].iter().any(|w| w.eq_ignore_ascii_case(alias))
+            {
+                found.push((real.clone(), text.clone(), index, words));
+            }
+        }
+    }
+    let (path, text, index, words) = match found.len() {
+        0 => {
+            return Err(format!(
+                "Host {alias} was not found in your SSH configuration."
+            ))
+        }
+        1 => found.pop().unwrap(),
+        _ => {
+            return Err(format!(
+                "Host {alias} is declared in several places. Edit your SSH configuration manually."
+            ))
+        }
+    };
+    let lines: Vec<&str> = text.split_inclusive('\n').collect();
+    let starts_block = |line: &str| {
+        tokens(line).first().is_some_and(|w| {
+            w.eq_ignore_ascii_case("host") || w.eq_ignore_ascii_case("match")
+        })
+    };
+    let comment = |line: &str| line.trim_start().starts_with('#');
+    let blank = |line: &str| line.trim().is_empty();
+    let patterns: Vec<&String> = words[1..]
+        .iter()
+        .filter(|w| !w.eq_ignore_ascii_case(alias))
+        .collect();
+    let mut kept: Vec<String> = lines.iter().map(|l| l.to_string()).collect();
+    if patterns.is_empty() {
+        let mut start = index;
+        while start > 0 && comment(lines[start - 1]) {
+            start -= 1;
+        }
+        let mut end = index + 1;
+        while end < lines.len() && !starts_block(lines[end]) {
+            end += 1;
+        }
+        // Comments directly above the next block describe that block.
+        if end < lines.len() {
+            while end > index + 1 && comment(lines[end - 1]) {
+                end -= 1;
+            }
+        }
+        kept.drain(start..end);
+        if end >= lines.len() {
+            while kept.last().is_some_and(|l| blank(l)) {
+                kept.pop();
+            }
+        }
+    } else {
+        let line = lines[index];
+        let indent = &line[..line.len() - line.trim_start().len()];
+        let ending = if line.ends_with("\r\n") {
+            "\r\n"
+        } else if line.ends_with('\n') {
+            "\n"
+        } else {
+            ""
+        };
+        let rest: Vec<&str> = patterns.iter().map(|s| s.as_str()).collect();
+        kept[index] = format!("{indent}{} {}{ending}", words[0], rest.join(" "));
+    }
+    Ok((path, text.clone(), kept.concat()))
+}
+
+fn same_file(a: &Path, b: &Path) -> bool {
+    a == b
+        || matches!((a.canonicalize(), b.canonicalize()), (Ok(x), Ok(y)) if x == y)
 }
 
 pub fn hosts() -> Result<Value> {
@@ -1006,9 +1184,10 @@ fn profile_for<'a>(
 pub fn clone_repo(payload: Value) -> Result<Value> {
     let source = field(&payload, "source")?.trim();
     let (source_host, owner, name) = repo_parts(source)?;
-    let folder = expand(field(&payload, "folder")?)?
+    let selected = expand(field(&payload, "folder")?)?;
+    let folder = selected
         .canonicalize()
-        .map_err(message)?;
+        .map_err(|e| missing(&selected, e))?;
     if !folder.is_dir() {
         return Err("Choose an existing destination folder.".into());
     }
@@ -1079,9 +1258,10 @@ pub fn clone_repo(payload: Value) -> Result<Value> {
 }
 
 pub fn scan_repos(payload: Value) -> Result<Value> {
-    let folder = expand(field(&payload, "folder")?)?
+    let selected = expand(field(&payload, "folder")?)?;
+    let folder = selected
         .canonicalize()
-        .map_err(message)?;
+        .map_err(|e| missing(&selected, e))?;
     let mut found = BTreeSet::new();
     let mut queue = std::collections::VecDeque::from([(folder, 0u8)]);
     let mut checked = 0usize;
@@ -1145,6 +1325,40 @@ mod tests {
         assert!(path.is_file() && public.is_file());
         remove_key_files(dir.path(), &request, &json!({}), None).unwrap();
         assert!(!path.exists() && !public.exists());
+    }
+
+    #[test]
+    fn keys_used_by_hand_written_ssh_hosts_are_protected() {
+        let home = tempfile::tempdir().unwrap();
+        let dir = home.path().join(".ssh");
+        fs::create_dir_all(dir.join("conf.d")).unwrap();
+        fs::write(
+            dir.join("config"),
+            "Include conf.d/*.conf\nHost github.com-sagar\n  IdentityFile ~/.ssh/sagar\n",
+        )
+        .unwrap();
+        fs::write(
+            dir.join("conf.d/work.conf"),
+            "Host build\n  IdentityFile \"%d/.ssh/build\"\n",
+        )
+        .unwrap();
+        let mut requests = Vec::new();
+        for name in ["sagar", "build", "spare"] {
+            let path = dir.join(name);
+            let mut keygen = command("ssh-keygen", &["-q", "-t", "ed25519", "-N", "", "-f"]);
+            keygen.arg(&path);
+            assert!(run(keygen, FAST, None).unwrap().status.success());
+            let (_, _, fingerprint) = validated_pub(&public_path(&path)).unwrap();
+            requests.push((path.clone(), json!({"path":path,"fingerprint":fingerprint,"hasPrivate":true})));
+        }
+        let state = with_config_hosts(&dir, json!({}));
+        let err = remove_key_files(&dir, &requests[0].1, &state, None).unwrap_err();
+        assert!(err.contains("Host github.com-sagar"), "{err}");
+        let err = remove_key_files(&dir, &requests[1].1, &state, None).unwrap_err();
+        assert!(err.contains("Host build"), "{err}");
+        assert!(requests[0].0.exists() && requests[1].0.exists());
+        remove_key_files(&dir, &requests[2].1, &state, None).unwrap();
+        assert!(!requests[2].0.exists());
     }
 
     #[cfg(unix)]

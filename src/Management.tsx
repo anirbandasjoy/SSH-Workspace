@@ -70,7 +70,7 @@ const labels = {
     singular: "key",
     icon: KeyIcon,
     empty:
-      "Generate a passphrase-protected key to use with a GitHub account or SSH host.",
+      "Generate an Ed25519 key to use with a GitHub account or SSH host.",
   },
   Hosts: {
     add: "Add host",
@@ -121,6 +121,14 @@ function Field({
     </label>
   );
 }
+function MissingKey() {
+  return (
+    <span className="mw-missing" role="note">
+      <AlertIcon size={14} />
+      Key file not found. Edit to choose an existing key.
+    </span>
+  );
+}
 function Pair({ name, children }: { name: string; children: ReactNode }) {
   return (
     <div>
@@ -165,7 +173,7 @@ function KeyDialog({
   async function submit(event: FormEvent) {
     event.preventDefault();
     if (busy) return;
-    if (!pass || pass !== confirm) {
+    if (pass !== confirm) {
       setError("Enter the same passphrase in both fields.");
       return;
     }
@@ -202,11 +210,13 @@ function KeyDialog({
             placeholder="id_ed25519_work"
           />
         </Field>
-        <Field name="Passphrase">
+        <Field
+          name="Passphrase (optional)"
+          hint="Leave both fields empty for a key without a passphrase."
+        >
           <input
             type="password"
             autoComplete="new-password"
-            required
             value={pass}
             onChange={(e) => setPass(e.target.value)}
           />
@@ -215,7 +225,6 @@ function KeyDialog({
           <input
             type="password"
             autoComplete="new-password"
-            required
             value={confirm}
             onChange={(e) => setConfirm(e.target.value)}
           />
@@ -806,7 +815,27 @@ function ManagementPage(props: Props) {
     hostProfile?.username,
     keys.find((k) => k.path === (profile || host)?.keyPath)?.fingerprint,
   ]);
+  // Errors describe the item as it was; drop them once it changes.
+  useEffect(() => setError(""), [identity]);
   const result = check?.identity === identity ? check.result : null;
+  const keyMissing = (path?: string) =>
+    Boolean(path && state.missingKeys?.includes(path));
+  const managedAliases = new Set(
+    [...state.profiles, ...state.hosts].map((item) => "Host " + item.alias),
+  );
+  const keyUsers = key
+    ? [
+        ...state.profiles
+          .filter((p) => p.keyPath === key.path)
+          .map((p) => p.name),
+        ...state.hosts
+          .filter((h) => h.keyPath === key.path)
+          .map((h) => h.alias),
+        ...(key.usedBy ?? [])
+          .filter((context) => !managedAliases.has(context))
+          .map((context) => context + " (SSH config)"),
+      ]
+    : [];
   const expected = profile?.username || hostProfile?.username;
   const matched =
     result?.ok &&
@@ -835,7 +864,12 @@ function ManagementPage(props: Props) {
         { kind: "removeRule", folder: id },
         "Remove folder rule",
       );
-    return openReview({ kind: "removeHost", alias: id }, "Remove host");
+    if (editable)
+      return openReview({ kind: "removeHost", alias: id }, "Remove host");
+    return openReview(
+      { kind: "removeConfigHost", alias: id },
+      "Delete host from SSH config",
+    );
   }
   const primary = (
     <button
@@ -922,6 +956,7 @@ function ManagementPage(props: Props) {
                   </Pair>
                   <Pair name="Identity file">
                     <code>{profile.keyPath}</code>
+                    {keyMissing(profile.keyPath) && <MissingKey />}
                   </Pair>
                   <Pair name="Folder rules">
                     {state.rules
@@ -949,14 +984,7 @@ function ManagementPage(props: Props) {
                     {key.loaded ? "Loaded" : "Not loaded"}
                   </Pair>
                   <Pair name="Used by">
-                    {[
-                      ...state.profiles
-                        .filter((p) => p.keyPath === key.path)
-                        .map((p) => p.name),
-                      ...state.hosts
-                        .filter((h) => h.keyPath === key.path)
-                        .map((h) => h.alias),
-                    ].join(", ") || "No managed profiles or hosts"}
+                    {keyUsers.join(", ") || "No profiles or hosts"}
                   </Pair>
                 </>
               )}
@@ -971,6 +999,7 @@ function ManagementPage(props: Props) {
                   <Pair name="Port">{host.port || 22}</Pair>
                   <Pair name="Identity file">
                     <code>{host.keyPath || "OpenSSH default"}</code>
+                    {editable && keyMissing(host.keyPath) && <MissingKey />}
                   </Pair>
                   <Pair name="Configured by">
                     {hostProfile ? hostProfile.name + " profile" : row.meta}
@@ -1087,7 +1116,7 @@ function ManagementPage(props: Props) {
                   <LinkExternalIcon size={13} />
                 </button>
               )}
-              {editable && (
+              {editable && !host && (
                 <button
                   type="button"
                   className="mw-icon-button mw-remove"
@@ -1099,7 +1128,24 @@ function ManagementPage(props: Props) {
                   <TrashIcon />
                 </button>
               )}
+              {host && !hostProfile && (
+                <button
+                  type="button"
+                  className="mw-button mw-danger mw-remove"
+                  disabled={Boolean(busy)}
+                  onClick={() => void run("remove", remove)}
+                >
+                  <TrashIcon />
+                  {busy === "remove" ? "Preparing…" : "Delete host"}
+                </button>
+              )}
             </div>
+            {host && hostProfile && (
+              <p className="mw-secondary">
+                This host belongs to the {hostProfile.name} profile. Remove the
+                profile to delete it.
+              </p>
+            )}
             {result && (
               <div
                 className={"mw-test " + (matched ? "is-good" : "is-warn")}
