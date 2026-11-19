@@ -35,6 +35,7 @@ export interface KeyInfo {
   fingerprint: string;
   type: string;
   loaded: boolean;
+  hasPrivate: boolean;
 }
 export interface Remote {
   name: string;
@@ -86,7 +87,7 @@ export function api<T = unknown>(
   if (!isTauri())
     return Promise.reject(
       new Error(
-        "Open the desktop app to access local SSH and Git. Start it with npm run desktop.",
+        "Open the desktop app to access local SSH and Git. Start it with pnpm desktop.",
       ),
     );
   return invoke<T>("workspace", { name, payload });

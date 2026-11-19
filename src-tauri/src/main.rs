@@ -14,8 +14,6 @@ fn dispatch(name: &str, payload: Value) -> Result<Value, String> {
         "inspect" => return native::inspect(payload),
         "keys" => return native::keys(),
         "public_key" => return native::public_key(payload),
-        "generate_key" => return native::generate_key(payload),
-        "agent_key" => return native::agent_key(payload),
         "hosts" => return native::hosts(),
         "test_connection" => return native::test_connection(payload),
         "scan_repos" => return native::scan_repos(payload),
@@ -25,6 +23,9 @@ fn dispatch(name: &str, payload: Value) -> Result<Value, String> {
         .lock()
         .map_err(|_| "Workspace operation interrupted. Reopen the app.")?;
     match name {
+        "generate_key" => native::generate_key(payload),
+        "agent_key" => native::agent_key(payload),
+        "delete_key" => native::delete_key(payload),
         "state" => config::state(),
         "preview" => config::preview(payload),
         "apply" => config::apply(payload),

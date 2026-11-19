@@ -397,7 +397,7 @@ fn describe_key(path: &Path, loaded: &HashSet<String>) -> Result<Value> {
     let (_, algorithm, fingerprint) = validated_pub(path)?;
     let private = path.with_extension("");
     Ok(
-        json!({"path":private,"publicPath":path,"name":private.file_name().unwrap_or_default().to_string_lossy(),"fingerprint":fingerprint,"type":algorithm,"loaded":loaded.contains(&fingerprint)}),
+        json!({"path":private,"publicPath":path,"name":private.file_name().unwrap_or_default().to_string_lossy(),"fingerprint":fingerprint,"type":algorithm,"loaded":loaded.contains(&fingerprint),"hasPrivate":private.symlink_metadata().is_ok()}),
     )
 }
 pub fn keys() -> Result<Value> {
@@ -523,6 +523,183 @@ pub fn agent_key(payload: Value) -> Result<Value> {
     }.into());
     }
     Ok(json!(true))
+}
+
+pub fn delete_key(payload: Value) -> Result<Value> {
+    let dir = home()?.join(".ssh");
+    let agent_socket = std::env::var_os("SSH_AUTH_SOCK");
+    remove_key_files(
+        &dir,
+        &payload,
+        &crate::config::state()?,
+        agent_socket.as_deref(),
+    )?;
+    Ok(json!(true))
+}
+
+fn unload_deleted_key(
+    public: &Path,
+    fingerprint: &str,
+    socket: Option<&std::ffi::OsStr>,
+) -> Result<()> {
+    let Some(socket) = socket else {
+        return Ok(());
+    };
+    let is_loaded = || {
+        let mut cmd = command("ssh-add", &["-l", "-E", "sha256"]);
+        cmd.env("SSH_AUTH_SOCK", socket);
+        let out = run(cmd, FAST, None)?;
+        Ok::<_, String>(match out.status.code() {
+            Some(0) => Some(
+                out.stdout
+                    .lines()
+                    .any(|line| line.split_whitespace().nth(1) == Some(fingerprint)),
+            ),
+            Some(1) => Some(false),
+            _ => None,
+        })
+    };
+    if is_loaded()? != Some(true) {
+        return Ok(());
+    }
+    let mut cmd = command("ssh-add", &["-d"]);
+    cmd.env("SSH_AUTH_SOCK", socket).arg(public);
+    let result = run(cmd, FAST, None);
+    if is_loaded()? == Some(false) {
+        return Ok(());
+    }
+    let detail = result.ok().map(|out| out.stderr).unwrap_or_default();
+    Err(if detail.is_empty() {
+        "The SSH agent could not confirm that it unloaded this key.".into()
+    } else {
+        format!("The SSH agent could not unload this key: {detail}")
+    })
+}
+
+fn remove_key_files(
+    dir: &Path,
+    payload: &Value,
+    state: &Value,
+    agent_socket: Option<&std::ffi::OsStr>,
+) -> Result<()> {
+    let private = expand(field(payload, "path")?)?;
+    if private.parent() != Some(dir) || private.file_name().is_none() {
+        return Err("Choose a key listed directly in your SSH folder.".into());
+    }
+    let public = public_path(&private);
+    if !public.symlink_metadata().map_err(message)?.is_file() {
+        return Err(
+            "Choose a regular public key file. Linked keys must be managed at their source.".into(),
+        );
+    }
+    let (_, _, fingerprint) = validated_pub(&public)?;
+    if field(payload, "fingerprint")? != fingerprint {
+        return Err("The selected key changed. Refresh the keys list and review it again.".into());
+    }
+    let has_private = match private.symlink_metadata() {
+        Ok(meta) if meta.is_file() => true,
+        Ok(_) => {
+            return Err(
+                "The private key is a link or special file. Manage it at its source.".into(),
+            )
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => false,
+        Err(e) => return Err(message(e)),
+    };
+    if payload["hasPrivate"].as_bool() != Some(has_private) {
+        return Err("The key files changed. Refresh the keys list and review them again.".into());
+    }
+    let selected_path = private.canonicalize().ok();
+    let public_path = public.canonicalize().map_err(message)?;
+    for reference in ["profiles", "hosts"]
+        .into_iter()
+        .flat_map(|kind| state[kind].as_array().into_iter().flatten())
+    {
+        let Some(path) = reference["keyPath"].as_str().and_then(|s| expand(s).ok()) else {
+            continue;
+        };
+        let resolved = path.canonicalize().ok();
+        if path == private
+            || path == public
+            || resolved.as_ref() == Some(&public_path)
+            || (selected_path.is_some() && resolved == selected_path)
+        {
+            let name = reference["name"]
+                .as_str()
+                .or_else(|| reference["alias"].as_str())
+                .unwrap_or("a workspace profile or host");
+            return Err(format!(
+                "Reassign the SSH key in {name} before deleting it."
+            ));
+        }
+    }
+    if has_private {
+        let mut header = [0; 64];
+        let bytes = File::open(&private)
+            .and_then(|mut file| file.read(&mut header))
+            .map_err(message)?;
+        let first_line = header[..bytes]
+            .split(|b| *b == b'\n')
+            .next()
+            .unwrap_or_default();
+        let first_line = first_line.strip_suffix(b"\r").unwrap_or(first_line);
+        if !matches!(
+            first_line,
+            b"-----BEGIN OPENSSH PRIVATE KEY-----"
+                | b"-----BEGIN RSA PRIVATE KEY-----"
+                | b"-----BEGIN EC PRIVATE KEY-----"
+                | b"-----BEGIN DSA PRIVATE KEY-----"
+                | b"-----BEGIN PRIVATE KEY-----"
+                | b"-----BEGIN ENCRYPTED PRIVATE KEY-----"
+        ) {
+            return Err(
+                "The matching private filename does not contain a recognized SSH private key."
+                    .into(),
+            );
+        }
+    }
+    // Stage both files together before deleting so a failed move can restore the public file.
+    let staging = tempfile::Builder::new()
+        .prefix(".ssh-workspace-delete-")
+        .tempdir_in(dir)
+        .map_err(message)?
+        .keep();
+    let mut moved = Vec::new();
+    let attempt = (|| {
+        for original in [&public, &private]
+            .into_iter()
+            .take(if has_private { 2 } else { 1 })
+        {
+            let staged = staging.join(original.file_name().ok_or("Invalid key filename.")?);
+            fs::rename(original, &staged)
+                .map_err(|error| format!("Could not move the key files for deletion: {error}"))?;
+            moved.push((original, staged));
+        }
+        // Hide files from agents that discover keys by looking in ~/.ssh.
+        unload_deleted_key(&moved[0].1, &fingerprint, agent_socket)
+    })();
+    if let Err(error) = attempt {
+        // Attempt to restore both files and keep the staging directory if either
+        // destination became occupied while the operation was running.
+        let mut restored = true;
+        for (original, staged) in moved.iter().rev() {
+            restored &= fs::hard_link(staged, original).is_ok();
+        }
+        if restored {
+            let _ = fs::remove_dir_all(&staging);
+            return Err(error);
+        }
+        return Err(format!(
+            "{error} Recover the staged key files from {}.",
+            staging.display()
+        ));
+    }
+    fs::remove_dir_all(&staging).map_err(|error| {
+        format!(
+            "The key is out of the SSH keys list. Check the remaining files in {}: {error}",
+            staging.display()
+        )
+    })
 }
 
 fn tokens(line: &str) -> Vec<String> {
@@ -950,6 +1127,77 @@ pub fn scan_repos(payload: Value) -> Result<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn deletes_only_the_confirmed_unassigned_key_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("id_ed25519");
+        let mut keygen = command("ssh-keygen", &["-q", "-t", "ed25519", "-N", "", "-f"]);
+        keygen.arg(&path);
+        assert!(run(keygen, FAST, None).unwrap().status.success());
+        let public = public_path(&path);
+        let (_, _, fingerprint) = validated_pub(&public).unwrap();
+        let request = json!({"path":path,"fingerprint":fingerprint,"hasPrivate":true});
+        let profile = json!({"profiles":[{"name":"Work","keyPath":path}]});
+        assert!(remove_key_files(dir.path(), &request, &profile, None).is_err());
+        let changed = json!({"path":path,"fingerprint":"SHA256:changed","hasPrivate":true});
+        assert!(remove_key_files(dir.path(), &changed, &json!({}), None).is_err());
+        assert!(path.is_file() && public.is_file());
+        remove_key_files(dir.path(), &request, &json!({}), None).unwrap();
+        assert!(!path.exists() && !public.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn deletes_key_loaded_in_an_isolated_ssh_agent() {
+        struct Agent(std::process::Child);
+        impl Drop for Agent {
+            fn drop(&mut self) {
+                let _ = self.0.kill();
+                let _ = self.0.wait();
+            }
+        }
+
+        let dir = tempfile::tempdir().unwrap();
+        let socket = dir.path().join("agent.sock");
+        let mut agent = Agent(
+            command("ssh-agent", &["-D", "-a"])
+                .arg(&socket)
+                .stdout(Stdio::null())
+                .spawn()
+                .unwrap(),
+        );
+        for _ in 0..100 {
+            if socket.exists() || agent.0.try_wait().unwrap().is_some() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(socket.exists(), "Could not start isolated SSH agent");
+        let generate = |name: &str| {
+            let path = dir.path().join(name);
+            let mut keygen = command("ssh-keygen", &["-q", "-t", "ed25519", "-N", "", "-f"]);
+            keygen.arg(&path);
+            assert!(run(keygen, FAST, None).unwrap().status.success());
+            let mut add = command("ssh-add", &[]);
+            add.env("SSH_AUTH_SOCK", &socket).arg(&path);
+            assert!(run(add, FAST, None).unwrap().status.success());
+            let (_, _, fingerprint) = validated_pub(&public_path(&path)).unwrap();
+            (path, fingerprint)
+        };
+        let (path, fingerprint) = generate("delete_me");
+        let (other, other_fingerprint) = generate("keep_me");
+        let request = json!({"path":path,"fingerprint":fingerprint,"hasPrivate":true});
+        remove_key_files(dir.path(), &request, &json!({}), Some(socket.as_os_str())).unwrap();
+        assert!(!path.exists() && !public_path(&path).exists());
+        assert!(other.exists() && public_path(&other).exists());
+        let mut list = command("ssh-add", &["-l", "-E", "sha256"]);
+        list.env("SSH_AUTH_SOCK", &socket);
+        let remaining = run(list, FAST, None).unwrap();
+        assert!(remaining.status.success());
+        assert!(remaining.stdout.contains(&other_fingerprint));
+        assert!(!remaining.stdout.contains(&fingerprint));
+    }
 
     #[test]
     fn github_greetings_verify_user_identity() {

@@ -21,19 +21,23 @@ The Debian installer is under `src-tauri/target/release/bundle/deb/`. Install it
 5. Set up the second profile. Add additional paths in **Folder rules**. In **Repositories**, open a local project, find projects in a folder, or clone from GitHub. Cloning selects the destination folder’s profile by default. The inspector shows the effective commit author and the account used by the selected remote. Use **Preview fix** to review an incorrect remote alias.
 6. **Undo last change** restores the last applied configuration transaction and checks for intervening edits. Removing a repository from the workspace list only changes the app’s bookmarks.
 
+## Delete a local SSH key
+
+In **SSH keys**, select a key and choose **Delete key**. Review the file list before confirming permanent deletion. The app unloads the key from the SSH agent if it is loaded. If a managed profile or host uses the key, reassign it first. Remove the public key from GitHub or your server to revoke access there.
+
 ## Development
 
-Install Node.js 22.12+ or a current LTS, Rust, Git, OpenSSH, and the native packages for Tauri 2. The packaged build here targets Ubuntu/Debian x86-64 with GTK 3 and WebKitGTK 4.1. [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/)
+Install Node.js 22.12+ or a current LTS, pnpm 10, Rust, Git, OpenSSH, and the native packages for Tauri 2. The packaged build here targets Ubuntu/Debian x86-64 with GTK 3 and WebKitGTK 4.1. [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/)
 
 ```sh
-npm ci
-npm run desktop
+pnpm install --frozen-lockfile
+pnpm desktop
 ```
 
 ```sh
-npm run build
+pnpm build
 cargo test --locked --manifest-path src-tauri/Cargo.toml
-npm run tauri -- build --bundles deb
+pnpm tauri build --bundles deb
 ```
 
 ## Local configuration

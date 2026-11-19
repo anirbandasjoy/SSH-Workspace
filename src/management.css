@@ -77,6 +77,17 @@
 .mw-button.mw-primary:hover {
   opacity: 0.88;
 }
+.mw-button.mw-danger {
+  color: var(--danger);
+}
+.mw-button.mw-danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger) 10%, var(--panel));
+}
+.mw-delete-files {
+  margin: 0;
+  padding-inline-start: 20px;
+  overflow-wrap: anywhere;
+}
 .mw-link,
 .mw-icon-button {
   border: 0;

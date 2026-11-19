@@ -763,6 +763,7 @@ function ManagementPage(props: Props) {
   const [selected, setSelected] = useState("");
   const [editor, setEditor] = useState<"new" | "edit" | null>(null);
   const [loadKey, setLoadKey] = useState<KeyInfo | null>(null);
+  const [keyToDelete, setKeyToDelete] = useState<KeyInfo | null>(null);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [check, setCheck] = useState<{ identity: string; result: Test } | null>(
@@ -1004,7 +1005,7 @@ function ManagementPage(props: Props) {
                 <button
                   type="button"
                   className="mw-button"
-                  disabled={Boolean(busy)}
+                  disabled={Boolean(busy) || (!key.hasPrivate && !key.loaded)}
                   onClick={() => {
                     if (!key.loaded) {
                       setLoadKey(key);
@@ -1025,6 +1026,20 @@ function ManagementPage(props: Props) {
                     : key.loaded
                       ? "Unload from agent"
                       : "Load into agent"}
+                </button>
+              )}
+              {key && (
+                <button
+                  type="button"
+                  className="mw-button mw-danger mw-remove"
+                  disabled={Boolean(busy)}
+                  onClick={() => {
+                    setError("");
+                    setKeyToDelete(key);
+                  }}
+                >
+                  <TrashIcon />
+                  Delete key
                 </button>
               )}
               {(profile || host) && (
@@ -1111,7 +1126,7 @@ function ManagementPage(props: Props) {
                 </div>
               </div>
             )}
-            <ErrorLine text={error} />
+            {!keyToDelete && <ErrorLine text={error} />}
           </section>
         </div>
       )}
@@ -1147,6 +1162,71 @@ function ManagementPage(props: Props) {
             void refresh().catch((e) => notify(reason(e)));
           }}
         />
+      )}
+      {keyToDelete && (
+        <Modal
+          title={
+            keyToDelete.hasPrivate
+              ? "Delete SSH key pair?"
+              : "Delete public key?"
+          }
+          busy={busy === "delete"}
+          onClose={() => {
+            setKeyToDelete(null);
+            setError("");
+          }}
+        >
+          <form
+            className="mw-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void run("delete", async () => {
+                const { path, fingerprint, hasPrivate } = keyToDelete;
+                await api("delete_key", { path, fingerprint, hasPrivate });
+                await refresh();
+                setKeyToDelete(null);
+                notify("SSH key deleted");
+              });
+            }}
+          >
+            <p className="mw-intro">
+              This unloads the key from the SSH agent if it is loaded and
+              permanently deletes the listed local files.
+            </p>
+            <ul className="mw-delete-files">
+              {keyToDelete.hasPrivate && (
+                <li>
+                  <code>{keyToDelete.path}</code>
+                </li>
+              )}
+              <li>
+                <code>{keyToDelete.publicPath}</code>
+              </li>
+            </ul>
+            <p className="mw-intro">
+              To revoke access, also remove the public key from GitHub or any
+              server where you registered it.
+            </p>
+            <ErrorLine text={error} />
+            <footer className="mw-form-actions">
+              <button
+                type="button"
+                className="mw-button"
+                autoFocus
+                disabled={Boolean(busy)}
+                onClick={() => {
+                  setKeyToDelete(null);
+                  setError("");
+                }}
+              >
+                Cancel
+              </button>
+              <button className="mw-button mw-danger" disabled={Boolean(busy)}>
+                {busy === "delete" ? "Deleting…" : "Delete permanently"}
+              </button>
+            </footer>
+          </form>
+        </Modal>
       )}
     </div>
   );
