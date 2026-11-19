@@ -1,0 +1,16 @@
+# Upload only source code; Vercel installs and builds everything itself.
+node_modules
+**/node_modules
+.turbo
+**/.turbo
+**/.next
+**/dist
+.vite
+.git
+
+# Desktop app build output (Rust) is several GB and not needed by the website.
+apps/desktop/src-tauri/target
+apps/desktop/src-tauri/gen
+
+.env*
+.vercel
