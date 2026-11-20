@@ -43,6 +43,20 @@ struct Output {
 fn message(err: impl std::fmt::Display) -> String {
     err.to_string()
 }
+/// Environment variable that turns the Vexo executable into an SSH_ASKPASS
+/// helper: it prints this value and exits (see main.rs).
+pub const ASKPASS_SECRET: &str = "VEXO_ASKPASS_SECRET";
+
+// OpenSSH for Windows reads passphrases only from a console, never from a
+// pipe. Run Vexo itself as the askpass program so ssh-add receives it.
+fn with_askpass(cmd: &mut Command, phrase: &str) -> Result<()> {
+    let helper = std::env::current_exe().map_err(message)?;
+    cmd.env("SSH_ASKPASS", helper)
+        .env("SSH_ASKPASS_REQUIRE", "force")
+        .env(ASKPASS_SECRET, phrase);
+    Ok(())
+}
+
 // Resolve a path like fs::canonicalize, but keep the ordinary drive-letter form
 // on Windows (C:\Users\...) instead of the \\?\ verbatim prefix, which Git
 // and users do not expect.
@@ -80,10 +94,15 @@ fn run(mut command: Command, seconds: u64, input: Option<&[u8]>) -> Result<Outpu
     } else {
         Stdio::null()
     });
-    command
-        .env("LC_ALL", "C")
-        .env("SSH_ASKPASS_REQUIRE", "never")
-        .env("GIT_TERMINAL_PROMPT", "0");
+    command.env("LC_ALL", "C").env("GIT_TERMINAL_PROMPT", "0");
+    // Never pop up a graphical passphrase prompt unless a caller opted in to
+    // the askpass helper below.
+    if !command
+        .get_envs()
+        .any(|(key, _)| key == "SSH_ASKPASS_REQUIRE")
+    {
+        command.env("SSH_ASKPASS_REQUIRE", "never");
+    }
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
@@ -516,6 +535,11 @@ fn generate_key_in(dir: &Path, payload: &Value) -> Result<Value> {
     let result = if phrase.is_empty() {
         cmd.args(["-N", ""]);
         run(cmd, 30, None)
+    } else if cfg!(windows) {
+        // OpenSSH for Windows cannot read a piped passphrase; -N is its
+        // documented way to set one without a console.
+        cmd.args(["-N", phrase]);
+        run(cmd, 30, None)
     } else {
         // Supply a real passphrase on stdin so it never appears in process arguments.
         let mut input = format!("{phrase}\n{phrase}\n").into_bytes();
@@ -557,12 +581,17 @@ pub fn agent_key(payload: Value) -> Result<Value> {
             if phrase.len() > 512 || phrase.contains(['\0', '\r', '\n']) {
                 return Err("Enter a passphrase on one line.".into());
             }
-            let mut input = format!("{phrase}\n").into_bytes();
             let mut cmd = command("ssh-add", &[]);
             cmd.arg(private);
-            let result = run(cmd, 30, Some(&input));
-            input.fill(0);
-            result?
+            if cfg!(windows) {
+                with_askpass(&mut cmd, phrase)?;
+                run(cmd, 30, None)?
+            } else {
+                let mut input = format!("{phrase}\n").into_bytes();
+                let result = run(cmd, 30, Some(&input));
+                input.fill(0);
+                result?
+            }
         }
         "unload" => {
             let mut cmd = command("ssh-add", &["-d"]);

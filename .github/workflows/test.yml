@@ -60,6 +60,13 @@ jobs:
           ssh -V
           ssh-keygen -h || true
 
+      - name: Start the Windows SSH agent service
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Set-Service ssh-agent -StartupType Manual
+          Start-Service ssh-agent
+
       - name: Run backend tests
         run: cargo test --locked --manifest-path apps/desktop/src-tauri/Cargo.toml -- --nocapture
 
