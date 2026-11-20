@@ -244,9 +244,47 @@ function Logo({ size = 32 }: { size?: number }) {
   );
 }
 
+// Structured data for search engines (schema.org).
+const jsonLd = [
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    name: site.name,
+    description: site.description,
+    url: site.url,
+    applicationCategory: "DeveloperApplication",
+    operatingSystem: "macOS 11+, Windows 10, Windows 11, Linux",
+    softwareVersion: site.version,
+    downloadUrl: Object.values(downloads).flatMap((group) =>
+      group.files.map((file) => file.url),
+    ),
+    image: `${site.url}/opengraph-image.png`,
+    screenshot: slides.map((slide) => `${site.url}${slide.image.src}`),
+    license: "https://opensource.org/licenses/MIT",
+    isAccessibleForFree: true,
+    offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
+    author: { "@type": "Person", name: site.author.name, url: site.author.url },
+  },
+  {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    mainEntity: faqs.map(({ q, a }) => ({
+      "@type": "Question",
+      name: q,
+      acceptedAnswer: { "@type": "Answer", text: a },
+    })),
+  },
+];
+
 export default function Home() {
   return (
     <>
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{
+          __html: JSON.stringify(jsonLd).replace(/</g, "\\u003c"),
+        }}
+      />
       <a className={styles.skip} href="#main">
         Skip to content
       </a>
@@ -501,7 +539,10 @@ export default function Home() {
             <Mark size={22} />
             <span>{site.name}</span>
           </a>
-          <p>Local SSH and Git identity manager. Free and open source.</p>
+          <p>
+            Local SSH and Git identity manager. Free and open source under the{" "}
+            <a href={`${site.repo}/blob/main/LICENSE`}>MIT License</a>.
+          </p>
           <a href={site.repo}>GitHub</a>
         </div>
       </footer>

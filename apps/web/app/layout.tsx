@@ -15,14 +15,51 @@ const monaSans = localFont({
   display: "swap",
 });
 
+// Social images come from app/opengraph-image.png and app/twitter-image.png.
 export const metadata: Metadata = {
-  metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000"),
-  title: `${site.name}: switch GitHub accounts and SSH keys with confidence`,
+  metadataBase: new URL(site.url),
+  title: {
+    default: site.title,
+    template: `%s · ${site.name}`,
+  },
   description: site.description,
+  applicationName: site.name,
+  keywords: site.keywords,
+  authors: [site.author],
+  creator: site.author.name,
+  publisher: site.author.name,
+  category: "developer tools",
+  alternates: {
+    canonical: "/",
+  },
   openGraph: {
-    title: site.name,
+    type: "website",
+    url: "/",
+    siteName: site.name,
+    title: site.title,
     description: site.description,
-    images: ["/screenshots/repositories.png"],
+    locale: "en_US",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: site.title,
+    description: site.description,
+  },
+  robots: {
+    index: true,
+    follow: true,
+    googleBot: {
+      index: true,
+      follow: true,
+      "max-image-preview": "large",
+      "max-snippet": -1,
+      "max-video-preview": -1,
+    },
+  },
+  formatDetection: {
+    telephone: false,
+    email: false,
+    address: false,
   },
 };
 
