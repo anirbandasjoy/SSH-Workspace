@@ -19,6 +19,7 @@ import {
   TerminalIcon,
 } from "@primer/octicons-react";
 import { CopyCommand } from "./components/CopyCommand";
+import { DemoVideo } from "./components/DemoVideo";
 import { DownloadButton } from "./components/DownloadButton";
 import { ScreenshotTour, type Slide } from "./components/ScreenshotTour";
 import { downloads, site, type Platform } from "./site";
@@ -259,6 +260,16 @@ const jsonLd = [
       group.files.map((file) => file.url),
     ),
     image: `${site.url}/opengraph-image.png`,
+    video: {
+      "@type": "VideoObject",
+      name: "Vexo demo: install and use Vexo",
+      description:
+        "Download Vexo from the website, install it on macOS, Windows or Linux, and set up GitHub profiles.",
+      thumbnailUrl: `${site.url}/vexo-promo-poster.jpg`,
+      contentUrl: `${site.url}/vexo-promo.mp4`,
+      uploadDate: "2026-11-20",
+      duration: "PT36S",
+    },
     screenshot: slides.map((slide) => `${site.url}${slide.image.src}`),
     license: "https://opensource.org/licenses/MIT",
     isAccessibleForFree: true,
@@ -295,6 +306,7 @@ export default function Home() {
             <span>{site.name}</span>
           </a>
           <div className={styles.navLinks}>
+            <a href="#demo">Demo</a>
             <a href="#features">Features</a>
             <a href="#tour">Tour</a>
             <a href="#how">How it works</a>
@@ -380,6 +392,25 @@ export default function Home() {
               <em>after</em> you pushed. {site.name} makes it visible and
               fixable.
             </p>
+          </div>
+        </section>
+
+        <section id="demo" className={styles.section}>
+          <div className={styles.container}>
+            <p className={styles.eyebrow}>
+              <DownloadIcon size={16} /> Demo
+            </p>
+            <h2 className={styles.sectionTitle}>
+              Install and use {site.name} in 36 seconds
+            </h2>
+            <p className={styles.sectionLead}>
+              Download from the website, install on macOS, Windows or Linux, and
+              set up your first profile.
+            </p>
+            <DemoVideo
+              src="/vexo-promo.mp4"
+              poster="/vexo-promo-poster.jpg"
+            />
           </div>
         </section>
 
