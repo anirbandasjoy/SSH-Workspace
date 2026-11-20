@@ -17,7 +17,7 @@ This is a [Turborepo](https://turborepo.dev) monorepo managed with pnpm.
 | Path | What it is |
 |---|---|
 | `apps/desktop` | The Vexo desktop app (Tauri 2, React, Rust). See its [README](apps/desktop/README.md). |
-| `apps/web` | The marketing and download website (Next.js, GitHub Primer tokens). |
+| `apps/web` | The website at [vexo.joydas.dev](https://vexo.joydas.dev) (Next.js, GitHub Primer tokens). |
 | `packages/typescript-config` | Shared TypeScript settings. |
 | `packages/eslint-config` | Shared ESLint settings. |
 
@@ -67,6 +67,15 @@ Set these when deploying the website if they differ from the defaults:
 
 | Variable | Purpose |
 |---|---|
-| `NEXT_PUBLIC_SITE_URL` | Public URL of the website, used for social previews |
+| `SITE_URL` | Public URL of the website (default `https://vexo.joydas.dev`), used for canonical links, social previews and the sitemap |
 | `NEXT_PUBLIC_REPO_URL` | GitHub repository URL |
 | `NEXT_PUBLIC_DOWNLOAD_URL` | Override the .deb download link |
+
+### Social preview image
+
+`apps/web/app/opengraph-image.png` (also used as `twitter-image.png`) is rendered from `apps/web/scripts/og-image.html`. After changing the template or the screenshots, run from `apps/web`:
+
+```sh
+google-chrome --headless=new --hide-scrollbars --window-size=1200,630 --screenshot=app/opengraph-image.png "file://$PWD/scripts/og-image.html"
+cp app/opengraph-image.png app/twitter-image.png
+```

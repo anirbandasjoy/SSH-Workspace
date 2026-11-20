@@ -76,6 +76,25 @@ export const downloads: Record<Platform, { name: string; files: Download[] }> = 
 };
 
 export const site = {
+  // Canonical address used for links, social previews and the sitemap.
+  url: (process.env.SITE_URL || "https://vexo.joydas.dev").replace(/\/+$/, ""),
+  title: "Vexo: manage multiple GitHub accounts and SSH keys",
+  author: { name: "Joy Das", url: "https://github.com/anirbandasjoy" },
+  keywords: [
+    "multiple GitHub accounts",
+    "SSH key manager",
+    "GitHub SSH keys",
+    "switch GitHub accounts",
+    "Git identity",
+    "git commit email per folder",
+    "includeIf gitdir",
+    "SSH config manager",
+    "ssh-agent",
+    "desktop app",
+    "macOS",
+    "Windows",
+    "Linux",
+  ],
   name: "Vexo",
   tagline: "Every GitHub account. The right key. Every time.",
   description:
