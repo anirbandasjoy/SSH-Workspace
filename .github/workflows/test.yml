@@ -1,0 +1,86 @@
+# Runs the desktop backend tests on real Linux, macOS and Windows machines,
+# and checks the website, on every push and pull request.
+name: Test
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  desktop:
+    name: Desktop (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux
+            platform: ubuntu-22.04
+          - name: macOS
+            platform: macos-latest
+          - name: Windows
+            platform: windows-latest
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: lts/*
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri -> target
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # The Rust app embeds the built UI, so build it before compiling tests.
+      - name: Build desktop UI
+        run: pnpm --filter desktop build
+
+      - name: Show Git and OpenSSH versions
+        run: |
+          git --version
+          ssh -V
+          ssh-keygen -h || true
+
+      - name: Start the Windows SSH agent service
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Set-Service ssh-agent -StartupType Manual
+          Start-Service ssh-agent
+
+      - name: Run backend tests
+        run: cargo test --locked --manifest-path apps/desktop/src-tauri/Cargo.toml -- --nocapture
+
+  web:
+    name: Website
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: lts/*
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build, type-check and lint
+        run: pnpm turbo run build check-types lint --filter=web --ui=stream

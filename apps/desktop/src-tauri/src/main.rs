@@ -62,6 +62,15 @@ fn open_github_settings(app: tauri::AppHandle) -> Result<(), String> {
 }
 
 fn main() {
+    // When ssh-add runs Vexo as its SSH_ASKPASS helper (Windows), print the
+    // passphrase it was given and exit before starting the window.
+    if let Some(secret) = std::env::var_os(native::ASKPASS_SECRET) {
+        use std::io::Write;
+        let mut out = std::io::stdout();
+        let _ = out.write_all(secret.to_string_lossy().as_bytes());
+        let _ = out.write_all(b"\n");
+        return;
+    }
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _, _| {
             if let Some(window) = app.get_webview_window("main") {
