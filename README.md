@@ -79,3 +79,7 @@ Set these when deploying the website if they differ from the defaults:
 google-chrome --headless=new --hide-scrollbars --window-size=1200,630 --screenshot=app/opengraph-image.png "file://$PWD/scripts/og-image.html"
 cp app/opengraph-image.png app/twitter-image.png
 ```
+
+## License
+
+[MIT](LICENSE) © 2026 Joy Das

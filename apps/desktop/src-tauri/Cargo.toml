@@ -3,6 +3,10 @@ name = "vexo"
 version = "0.1.1"
 description = "Switch GitHub accounts and SSH keys with confidence"
 edition = "2021"
+license = "MIT"
+authors = ["Joy Das"]
+repository = "https://github.com/anirbandasjoy/vexo"
+homepage = "https://vexo.joydas.dev"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

@@ -260,6 +260,7 @@ const jsonLd = [
     ),
     image: `${site.url}/opengraph-image.png`,
     screenshot: slides.map((slide) => `${site.url}${slide.image.src}`),
+    license: "https://opensource.org/licenses/MIT",
     isAccessibleForFree: true,
     offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
     author: { "@type": "Person", name: site.author.name, url: site.author.url },
@@ -538,7 +539,10 @@ export default function Home() {
             <Mark size={22} />
             <span>{site.name}</span>
           </a>
-          <p>Local SSH and Git identity manager. Free and open source.</p>
+          <p>
+            Local SSH and Git identity manager. Free and open source under the{" "}
+            <a href={`${site.repo}/blob/main/LICENSE`}>MIT License</a>.
+          </p>
           <a href={site.repo}>GitHub</a>
         </div>
       </footer>

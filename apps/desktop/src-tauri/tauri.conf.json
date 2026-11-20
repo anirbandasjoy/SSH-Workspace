@@ -54,6 +54,9 @@
       "nsis": {
         "installMode": "currentUser"
       }
-    }
+    },
+    "copyright": "Copyright (c) 2026 Joy Das. MIT License.",
+    "license": "MIT",
+    "homepage": "https://vexo.joydas.dev"
   }
 }
