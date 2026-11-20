@@ -16,7 +16,7 @@ const monaSans = localFont({
 });
 
 export const metadata: Metadata = {
-  metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000"),
+  metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000"),
   title: `${site.name}: switch GitHub accounts and SSH keys with confidence`,
   description: site.description,
   openGraph: {

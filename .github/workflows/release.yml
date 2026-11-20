@@ -1,0 +1,93 @@
+# Builds Vexo for macOS, Windows and Linux and uploads the installers to the
+# GitHub release for the version in apps/desktop/src-tauri/tauri.conf.json.
+#
+# Release a new version:
+#   1. Bump the version in tauri.conf.json, Cargo.toml and apps/desktop/package.json.
+#   2. git tag v<version> && git push origin v<version>
+# Or run it by hand from the Actions tab (Run workflow) for the current version.
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS (Apple Silicon)
+            platform: macos-latest
+            args: --target aarch64-apple-darwin --bundles dmg
+          - name: macOS (Intel)
+            platform: macos-latest
+            args: --target x86_64-apple-darwin --bundles dmg
+          - name: Windows
+            platform: windows-latest
+            args: --bundles nsis
+          - name: Linux
+            platform: ubuntu-22.04
+            args: --bundles deb,appimage
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf xdg-utils
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: lts/*
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ runner.os == 'macOS' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri -> target
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Test backend
+        if: runner.os == 'Linux'
+        run: cargo test --locked --manifest-path apps/desktop/src-tauri/Cargo.toml
+
+      - uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: apps/desktop
+          tauriScript: pnpm tauri
+          tagName: v__VERSION__
+          releaseName: Vexo __VERSION__
+          releaseBody: |
+            Download the installer for your computer:
+
+            - **macOS (Apple Silicon, M1 and newer):** `Vexo___VERSION___aarch64.dmg`
+            - **macOS (Intel):** `Vexo___VERSION___x64.dmg`
+            - **Windows 10/11:** `Vexo___VERSION___x64-setup.exe`
+            - **Ubuntu / Debian:** `Vexo___VERSION___amd64.deb`
+            - **Other Linux:** `Vexo___VERSION___amd64.AppImage`
+
+            Vexo needs Git and OpenSSH. See https://github.com/anirbandasjoy/vexo for details.
+          releaseDraft: false
+          prerelease: false
+          args: ${{ matrix.args }}

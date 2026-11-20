@@ -2,6 +2,12 @@
 
 A Tauri 2 desktop application for managing SSH keys, GitHub profiles, Git authors, and folder-based account rules. The interface uses React, TypeScript, GitHub Primer, and Octicons. The Rust backend works with your installed Git and OpenSSH.
 
+## Requirements
+
+- **macOS 11+:** Git (install the Xcode Command Line Tools with `xcode-select --install`). OpenSSH is built in.
+- **Windows 10/11:** [Git for Windows](https://git-scm.com/download/win). The OpenSSH client is built in; start the **OpenSSH Authentication Agent** service to load keys into the agent.
+- **Linux:** `git` and `openssh-client`.
+
 ## Run on Linux
 
 Launch the compiled executable from `apps/desktop`.

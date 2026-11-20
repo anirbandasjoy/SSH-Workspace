@@ -26,14 +26,11 @@
   },
   "bundle": {
     "active": true,
-    "targets": [
-      "deb"
-    ],
+    "targets": "all",
     "icon": [
       "icons/32x32.png",
       "icons/64x64.png",
       "icons/128x128.png",
-      
       "icons/icon.png",
       "icons/icon.ico",
       "icons/icon.icns"
@@ -48,6 +45,15 @@
         ]
       }
     },
-    "longDescription": "Vexo manages SSH keys, GitHub profiles, commit authors and folder rules on your computer, and shows exactly what changes before writing any file."
+    "longDescription": "Vexo manages SSH keys, GitHub profiles, commit authors and folder rules on your computer, and shows exactly what changes before writing any file.",
+    "macOS": {
+      "signingIdentity": "-",
+      "minimumSystemVersion": "11.0"
+    },
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    }
   }
 }

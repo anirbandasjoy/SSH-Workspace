@@ -1,7 +1,9 @@
 import Image from "next/image";
 import {
+  AppsIcon,
   ArrowRightIcon,
   CheckCircleIcon,
+  DeviceDesktopIcon,
   DownloadIcon,
   FileDiffIcon,
   FileDirectoryIcon,
@@ -17,8 +19,9 @@ import {
   TerminalIcon,
 } from "@primer/octicons-react";
 import { CopyCommand } from "./components/CopyCommand";
+import { DownloadButton } from "./components/DownloadButton";
 import { ScreenshotTour, type Slide } from "./components/ScreenshotTour";
-import { site } from "./site";
+import { downloads, site, type Platform } from "./site";
 import styles from "./page.module.css";
 import repositories from "../public/screenshots/repositories.png";
 import mismatch from "../public/screenshots/repository-mismatch.png";
@@ -161,6 +164,27 @@ const steps = [
   },
 ];
 
+const platforms: { id: Platform; icon: typeof KeyIcon; install: string }[] = [
+  {
+    id: "mac",
+    icon: DeviceDesktopIcon,
+    install:
+      "Open the .dmg and drag Vexo to Applications. On first launch, right-click Vexo and choose Open.",
+  },
+  {
+    id: "windows",
+    icon: AppsIcon,
+    install:
+      "Run the installer. Needs Git for Windows; OpenSSH is built into Windows 10 and 11.",
+  },
+  {
+    id: "linux",
+    icon: TerminalIcon,
+    install:
+      "Install the .deb with apt, or make the AppImage executable and run it.",
+  },
+];
+
 const faqs = [
   {
     q: "Will it change my existing GitHub setup?",
@@ -176,7 +200,11 @@ const faqs = [
   },
   {
     q: "Which platforms are supported?",
-    a: "The current release ships as a .deb for Ubuntu and Debian on x86-64. Vexo is built with Tauri, so macOS and Windows builds can be made from source.",
+    a: "macOS 11 or newer (Apple Silicon and Intel), Windows 10 and 11 (64-bit), and Linux as a .deb for Ubuntu and Debian or an AppImage for other distributions.",
+  },
+  {
+    q: "Why does my computer warn me when I open it?",
+    a: "Vexo is not yet signed with paid Apple or Microsoft certificates. On macOS, right-click Vexo in Applications and choose Open. On Windows, choose More info, then Run anyway. You only need to do this once.",
   },
 ];
 
@@ -255,7 +283,7 @@ export default function Home() {
           <div className={styles.container}>
             <a className={styles.pill} href="#download">
               <span className={styles.pillLabel}>New</span>
-              {site.name} {site.version} for Linux is here
+              {site.name} {site.version} for macOS, Windows and Linux
               <ArrowRightIcon size={14} />
             </a>
             <h1 className={styles.heroTitle}>
@@ -271,13 +299,10 @@ export default function Home() {
               again.
             </p>
             <div className={styles.heroActions}>
-              <a
+              <DownloadButton
+                downloads={downloads}
                 className={`${styles.btn} ${styles.btnPrimary} ${styles.btnLarge}`}
-                href={site.downloads.linuxDeb}
-              >
-                <DownloadIcon size={20} />
-                Download for Linux
-              </a>
+              />
               <a
                 className={`${styles.btn} ${styles.btnLarge}`}
                 href={site.repo}
@@ -287,7 +312,8 @@ export default function Home() {
               </a>
             </div>
             <p className={styles.heroMeta}>
-              Free and open source · v{site.version} · Ubuntu / Debian x86-64
+              Free and open source · v{site.version} ·{" "}
+              <a href="#download">macOS, Windows and Linux</a>
             </p>
             <div className={`${styles.window} ${styles.heroWindow}`}>
               <div className={styles.windowBar} aria-hidden="true">
@@ -413,32 +439,42 @@ export default function Home() {
               <Logo size={88} />
               <h2 className={styles.sectionTitle}>Download {site.name}</h2>
               <p className={styles.sectionLead}>
-                Version {site.version} for Ubuntu and Debian (x86-64). Requires
-                Git and OpenSSH.
+                Version {site.version}. Free for macOS, Windows and Linux.
+                Requires Git and OpenSSH.
               </p>
-              <div className={styles.heroActions}>
-                <a
-                  className={`${styles.btn} ${styles.btnPrimary} ${styles.btnLarge}`}
-                  href={site.downloads.linuxDeb}
-                >
-                  <DownloadIcon size={20} />
-                  Download .deb
-                </a>
-                <a
-                  className={`${styles.btn} ${styles.btnLarge}`}
-                  href={site.releases}
-                >
-                  All releases
-                </a>
+              <div className={styles.platforms}>
+                {platforms.map(({ id, icon: Icon, install }) => (
+                  <section key={id} className={styles.platform}>
+                    <h3>
+                      <Icon size={20} />
+                      {downloads[id].name}
+                    </h3>
+                    <div className={styles.platformFiles}>
+                      {downloads[id].files.map((file, i) => (
+                        <a
+                          key={file.file}
+                          href={file.url}
+                          className={`${styles.btn} ${i === 0 ? styles.btnPrimary : ""} ${styles.platformButton}`}
+                        >
+                          <DownloadIcon size={16} />
+                          <span>
+                            {file.label}
+                            <small>{file.detail}</small>
+                          </span>
+                        </a>
+                      ))}
+                    </div>
+                    <p className={styles.platformInstall}>{install}</p>
+                  </section>
+                ))}
               </div>
               <div className={styles.install}>
-                <p>Install from the folder you downloaded it to:</p>
+                <p>Ubuntu or Debian: install from the folder you downloaded it to.</p>
                 <CopyCommand command={`sudo apt install ./${site.debFile}`} />
               </div>
               <p className={styles.downloadNote}>
-                macOS and Windows: build from source with{" "}
-                <code>pnpm desktop:bundle</code>. See the{" "}
-                <a href={site.repo}>README</a>.
+                Looking for an older version? See{" "}
+                <a href={site.releases}>all releases</a>.
               </p>
             </div>
           </div>

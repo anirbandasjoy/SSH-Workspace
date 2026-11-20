@@ -41,12 +41,27 @@ pnpm desktop:bundle                 # build apps/desktop/src-tauri/target/releas
 
 ## Publishing a release
 
-The website's download buttons point to the latest GitHub release asset named `Vexo_<version>_amd64.deb`, using the version in `apps/desktop/src-tauri/tauri.conf.json`.
+`.github/workflows/release.yml` builds Vexo on GitHub's macOS, Windows and Linux machines and uploads the installers to the GitHub release:
+
+| Platform | File |
+|---|---|
+| macOS (Apple Silicon) | `Vexo_<version>_aarch64.dmg` |
+| macOS (Intel) | `Vexo_<version>_x64.dmg` |
+| Windows 10/11 | `Vexo_<version>_x64-setup.exe` |
+| Ubuntu / Debian | `Vexo_<version>_amd64.deb` |
+| Other Linux | `Vexo_<version>_amd64.AppImage` |
+
+1. Set the same version in `apps/desktop/src-tauri/tauri.conf.json`, `apps/desktop/src-tauri/Cargo.toml` and `apps/desktop/package.json`, then commit and push.
+2. Tag the release and push the tag:
 
 ```sh
-pnpm desktop:bundle
-gh release create v0.1.1 "apps/desktop/src-tauri/target/release/bundle/deb/Vexo_0.1.1_amd64.deb" --title "Vexo 0.1.1"
+git tag v0.2.0
+git push origin v0.2.0
 ```
+
+To add installers to an existing release, open the repository's **Actions → Release → Run workflow**. The website's download buttons point to these file names on the latest release.
+
+The installers are not signed with paid Apple or Microsoft certificates yet. On first launch, macOS users right-click Vexo and choose **Open**, and Windows users choose **More info → Run anyway**.
 
 Set these when deploying the website if they differ from the defaults:
 
