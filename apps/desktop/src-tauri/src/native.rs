@@ -43,6 +43,21 @@ struct Output {
 fn message(err: impl std::fmt::Display) -> String {
     err.to_string()
 }
+// Resolve a path like fs::canonicalize, but keep the ordinary drive-letter form
+// on Windows (C:\Users\...) instead of the \\?\ verbatim prefix, which Git
+// and users do not expect.
+pub(crate) fn canonical(path: &Path) -> std::io::Result<PathBuf> {
+    let resolved = fs::canonicalize(path)?;
+    #[cfg(windows)]
+    if let Some(text) = resolved.to_str() {
+        if let Some(rest) = text.strip_prefix(r"\\?\") {
+            if !rest.starts_with("UNC\\") {
+                return Ok(PathBuf::from(rest));
+            }
+        }
+    }
+    Ok(resolved)
+}
 // Name the missing file instead of surfacing a bare OS error.
 fn missing(path: &Path, err: std::io::Error) -> String {
     if err.kind() == std::io::ErrorKind::NotFound {
@@ -462,7 +477,10 @@ pub fn public_key(payload: Value) -> Result<Value> {
     Ok(json!(validated_pub(&path)?.0))
 }
 pub fn generate_key(payload: Value) -> Result<Value> {
-    let name = field(&payload, "name")?;
+    generate_key_in(&home()?.join(".ssh"), &payload)
+}
+fn generate_key_in(dir: &Path, payload: &Value) -> Result<Value> {
+    let name = field(payload, "name")?;
     if !identifier(name) || name.ends_with(".pub") || name.len() > 120 {
         return Err(
             "Use a key filename containing letters, numbers, dots, hyphens or underscores.".into(),
@@ -477,7 +495,6 @@ pub fn generate_key(payload: Value) -> Result<Value> {
     if phrase.len() > 512 || phrase.contains(['\0', '\r', '\n']) {
         return Err("Use a passphrase on one line, up to 512 bytes.".into());
     }
-    let dir = home()?.join(".ssh");
     if !dir.exists() {
         let mut builder = fs::DirBuilder::new();
         #[cfg(unix)]
@@ -485,14 +502,14 @@ pub fn generate_key(payload: Value) -> Result<Value> {
             use std::os::unix::fs::DirBuilderExt;
             builder.mode(0o700);
         }
-        builder.recursive(true).create(&dir).map_err(message)?;
+        builder.recursive(true).create(dir).map_err(message)?;
     }
     let private = dir.join(name);
     let public = public_path(&private);
     if private.symlink_metadata().is_ok() || public.symlink_metadata().is_ok() {
         return Err("A key with that filename already exists.".into());
     }
-    let tmp = tempfile::tempdir_in(&dir).map_err(message)?;
+    let tmp = tempfile::tempdir_in(dir).map_err(message)?;
     let generated = tmp.path().join("key");
     let mut cmd = command("ssh-keygen", &["-q", "-t", "ed25519", "-C", name, "-f"]);
     cmd.arg(&generated);
@@ -1161,7 +1178,7 @@ fn profile_for<'a>(
     let rules = state["rules"].as_array().into_iter().flatten();
     let inferred = rules
         .filter_map(|rule| {
-            let path = expand(rule["folder"].as_str()?).ok()?.canonicalize().ok()?;
+            let path = canonical(&expand(rule["folder"].as_str()?).ok()?).ok()?;
             folder
                 .starts_with(&path)
                 .then(|| (path.components().count(), rule["profileId"].as_str()))
@@ -1185,9 +1202,7 @@ pub fn clone_repo(payload: Value) -> Result<Value> {
     let source = field(&payload, "source")?.trim();
     let (source_host, owner, name) = repo_parts(source)?;
     let selected = expand(field(&payload, "folder")?)?;
-    let folder = selected
-        .canonicalize()
-        .map_err(|e| missing(&selected, e))?;
+    let folder = canonical(&selected).map_err(|e| missing(&selected, e))?;
     if !folder.is_dir() {
         return Err("Choose an existing destination folder.".into());
     }
@@ -1259,9 +1274,7 @@ pub fn clone_repo(payload: Value) -> Result<Value> {
 
 pub fn scan_repos(payload: Value) -> Result<Value> {
     let selected = expand(field(&payload, "folder")?)?;
-    let folder = selected
-        .canonicalize()
-        .map_err(|e| missing(&selected, e))?;
+    let folder = canonical(&selected).map_err(|e| missing(&selected, e))?;
     let mut found = BTreeSet::new();
     let mut queue = std::collections::VecDeque::from([(folder, 0u8)]);
     let mut checked = 0usize;
@@ -1325,6 +1338,29 @@ mod tests {
         assert!(path.is_file() && public.is_file());
         remove_key_files(dir.path(), &request, &json!({}), None).unwrap();
         assert!(!path.exists() && !public.exists());
+    }
+
+    #[test]
+    fn generates_keys_with_and_without_passphrase() {
+        let dir = tempfile::tempdir().unwrap();
+        let ssh = dir.path().join(".ssh");
+        let opens = |name: &str, phrase: &str| {
+            let mut check = command("ssh-keygen", &["-y", "-P", phrase, "-f"]);
+            check.arg(ssh.join(name));
+            run(check, FAST, None).unwrap().status.success()
+        };
+        let plain = generate_key_in(&ssh, &json!({"name":"plain","passphrase":""})).unwrap();
+        assert_eq!(plain["name"], "plain");
+        assert!(opens("plain", ""));
+        let locked =
+            generate_key_in(&ssh, &json!({"name":"locked","passphrase":"correct horse 1"})).unwrap();
+        assert!(locked["fingerprint"].as_str().unwrap().starts_with("SHA256:"));
+        assert!(opens("locked", "correct horse 1"), "passphrase was not applied");
+        assert!(!opens("locked", ""), "key was saved without its passphrase");
+        assert!(generate_key_in(&ssh, &json!({"name":"plain","passphrase":""}))
+            .unwrap_err()
+            .contains("already exists"));
+        assert!(generate_key_in(&ssh, &json!({"name":"../escape","passphrase":""})).is_err());
     }
 
     #[test]
@@ -1462,7 +1498,10 @@ mod tests {
         assert_eq!(details["email"], "dev@example.test");
         assert!(details["emailSource"].as_str().unwrap().contains("config"));
         assert_eq!(details["remotes"][0]["alias"], "github-work");
-        assert_eq!(scan_repos(json!({"folder":p})).unwrap()[0], json!(p));
+        assert_eq!(
+            scan_repos(json!({"folder":p})).unwrap()[0],
+            json!(canonical(p).unwrap())
+        );
         git_value(p, &["config", "author.email", "author@example.test"]).unwrap();
         assert_eq!(
             inspect(json!({"path":p})).unwrap()["email"],
@@ -1472,7 +1511,7 @@ mod tests {
     #[test]
     fn nested_folder_rules_use_closest_parent() {
         let dir = tempfile::tempdir().unwrap();
-        let parent = dir.path().canonicalize().unwrap();
+        let parent = canonical(dir.path()).unwrap();
         let nested = parent.join("client");
         fs::create_dir(&nested).unwrap();
         let state = json!({"profiles":[{"id":"work"},{"id":"client"}],"rules":[{"folder":nested,"profileId":"client"},{"folder":parent,"profileId":"work"}]});
