@@ -204,7 +204,7 @@ const faqs = [
   },
   {
     q: "Why does my computer warn me when I open it?",
-    a: "Vexo is not yet signed with paid Apple or Microsoft certificates. On macOS, right-click Vexo in Applications and choose Open. On Windows, choose More info, then Run anyway. You only need to do this once.",
+    a: "Vexo is free and open source, and it is not registered with Apple or Microsoft yet, so your computer asks you to confirm the first time. On macOS, right-click Vexo in Applications and choose Open. On Windows, choose More info, then Run anyway. You only need to do this once.",
   },
 ];
 
